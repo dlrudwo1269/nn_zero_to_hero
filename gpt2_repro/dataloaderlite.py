@@ -7,6 +7,7 @@ import torch
 def load_tokens(filename):
     # take tokens saved as np arrays and load them as tensors
     npt = np.load(filename)
+    npt = npt.astype(np.int32)
     ptt = torch.tensor(npt, dtype=torch.long)
     return ptt
 

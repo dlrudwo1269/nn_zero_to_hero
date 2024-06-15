@@ -19,7 +19,7 @@ fw = load_dataset("HuggingFaceFW/fineweb-edu", name=remote_name, split="train")
 
 # init tokenizer
 enc = tiktoken.get_encoding("gpt2")
-eot = enc._special_tokens['< |endoftext|>']
+eot = enc._special_tokens['<|endoftext|>']
 def tokenize(doc):
     # tokenizes a single document and returns a numpy array of uint16 tokens
     # note that EOT token also begins the sequence

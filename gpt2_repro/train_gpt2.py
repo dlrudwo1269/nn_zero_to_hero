@@ -23,20 +23,27 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-ampere_gpu = False
+ampere_gpu = True
 if ampere_gpu:
     torch.set_float32_matmul_precision("high") # use tf32 where possible
 
-use_compile = True
+use_compile = False
 
-max_lr = 6e-4
+# Original GPT training hyperparameters
+# max_lr = 6e-4
+# min_lr = max_lr * 0.1
+# warmup_steps = 715
+# max_steps = 19073
+
+# Change slightly to to a toy training run
+max_lr = 6e-4 * 3
 min_lr = max_lr * 0.1
-warmup_steps = 715
-max_steps = 19073
+warmup_steps = 100
+max_steps = 2000
 
 total_batch_size = 2 ** 19 # ~0.5M
-B = 4 # micro batch size
-T = 32 # sequence length
+B = 16 # micro batch size
+T = 1024 # sequence length
 
 # set up DDP
 ddp = int(os.environ.get('RANK', -1)) != -1
@@ -106,7 +113,7 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # starts at 1 and goes to 0
     return min_lr + coeff * (max_lr - min_lr)
 
-optimizer = raw_model.configure_optimizer(weight_decay=0.1, learning_rate=6e-4, device=device)
+optimizer = raw_model.configure_optimizer(weight_decay=0.1, learning_rate=6e-4, device=device, master_process=master_process)
 
 for step in range(max_steps):
     t0 = time.time()
@@ -118,11 +125,11 @@ for step in range(max_steps):
         val_loader.reset()
         with torch.no_grad():
             val_loss_accum = 0.0
-            val_loss_steps = 2 ** 25 / (B * T * ddp_world_size)
+            val_loss_steps = 2 ** 25 // (B * T * ddp_world_size)
             for _ in range(val_loss_steps):
                 x, y = val_loader.next_batch()
                 x, y = x.to(device), y.to(device)
-                with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     logits, loss = model(x, y)
                 loss = loss / val_loss_steps
                 val_loss_accum += loss.detach()
@@ -161,14 +168,15 @@ for step in range(max_steps):
         while xgen.size(1) < max_length:
             # forward the model to get the logits
             with torch.no_grad():
+                if ampere_gpu:
+                    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                        logits, loss = model(xgen)
+                else:
+                    logits, loss = model(xgen)
                 # take the logits at the last position
                 logits = logits[:, -1, :] # (B, vocab_size)
                 # get the probs
-                if ampere_gpu:
-                    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-                        probs = F.softmax(logits, dim=-1)
-                else:
-                    probs = F.softmax(logits, dim=-1)
+                probs = F.softmax(logits, dim=-1)
                 # do top-k sampling of 50
                 topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
                 # select a token from the top-k probabilities
@@ -176,11 +184,11 @@ for step in range(max_steps):
                 # gather the corresponding indices
                 xcol = torch.gather(topk_indices, -1, ix)
                 xgen = torch.cat((xgen, xcol), dim=1)
-            # print the generated text
-            for i in range(num_return_sequences):
-                tokens = xgen[i, :max_length].tolist()
-                decoded = enc.decode(tokens)
-                print(f"rank {ddp_rank} sample{i}: {decoded}")
+        # print the generated text
+        for i in range(num_return_sequences):
+            tokens = xgen[i, :max_length].tolist()
+            decoded = enc.decode(tokens)
+            print(f"rank {ddp_rank} sample{i}: {decoded}")
             
     # one step of optimization
     model.train()
@@ -190,7 +198,7 @@ for step in range(max_steps):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
         if ampere_gpu:
-            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits, loss = model(x, y)
         else:
             logits, loss = model(x, y)
