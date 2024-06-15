@@ -9,7 +9,7 @@ This directory contains the following files/directories:
 6. `log.txt`: Contains sample logs from training (for the first 200 steps)
 
 ## Training Details
-A sample training run was performed on a Lambda Labs `gpu_8x_a100` instance for 1 hour to verify that training works as expected. It took roughly 30 minutes to preprocess the training data using `fineweb.py`. The output from the first few iterations of the training loop are as follows:
+A sample training run was performed on a Lambda Labs `gpu_8x_a100` instance for 1 hour to verify that training works as expected. It took roughly 30 minutes to preprocess the training data using `fineweb.py`. The output from the first few iterations of the training loop are shown below:
 ```
 total desired batch size: 524288
 => calculated gradient accumulation steps: 4
